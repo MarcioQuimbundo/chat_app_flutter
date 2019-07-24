@@ -1,6 +1,12 @@
+import 'dart:io';
+
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:google_sign_in/google_sign_in.dart';
+import 'package:image_picker/image_picker.dart';
 
 void main() async {
   runApp(MyApp());
@@ -12,7 +18,45 @@ final ThemeData kIOSTheme = ThemeData(
     primaryColorBrightness: Brightness.light);
 
 final ThemeData kDefaultTheme = ThemeData(
-    primarySwatch: Colors.amber, accentColor: Colors.orangeAccent[400]);
+    primarySwatch: Colors.amber, accentColor: Colors.amberAccent[400]);
+
+final googleSignIn = GoogleSignIn();
+final auth = FirebaseAuth.instance;
+
+Future<Null> _ensureLoggedIn() async {
+  GoogleSignInAccount user = googleSignIn.currentUser;
+  if (user == null) {
+    try {
+      user = await googleSignIn.signInSilently();
+    } catch (e) {
+      print('$e');
+    }
+  }
+  if (user == null) user = await googleSignIn.signIn();
+  if (await auth.currentUser() == null) {
+    final GoogleSignInAuthentication googleAuth =
+        await googleSignIn.currentUser.authentication;
+    final AuthCredential credential = GoogleAuthProvider.getCredential(
+      accessToken: googleAuth.accessToken,
+      idToken: googleAuth.idToken,
+    );
+    await auth.signInWithCredential(credential);
+  }
+}
+
+_handleSubmitted(String text) async {
+  await _ensureLoggedIn();
+  _sendMessage(text: text);
+}
+
+void _sendMessage({String text, String imgUrl}) {
+  Firestore.instance.collection("messages").add({
+    "text": text,
+    "imgUrl": imgUrl,
+    "senderName": googleSignIn.currentUser.displayName,
+    "senderPhotoUrl": googleSignIn.currentUser.photoUrl
+  });
+}
 
 class MyApp extends StatelessWidget {
   const MyApp({Key key}) : super(key: key);
@@ -38,11 +82,18 @@ class ChatScreen extends StatefulWidget {
 
 class _ChatScreenState extends State<ChatScreen> {
   @override
+  void initState() {
+    _ensureLoggedIn();
+    super.initState();
+  }
+
+  @override
   Widget build(BuildContext context) {
     return SafeArea(
       bottom: false,
       top: false,
       child: Scaffold(
+        backgroundColor: Colors.black,
         appBar: AppBar(
           title: Text("Concierge Chat"),
           centerTitle: true,
@@ -52,12 +103,27 @@ class _ChatScreenState extends State<ChatScreen> {
         body: Column(
           children: <Widget>[
             Expanded(
-              child: ListView(
-                children: <Widget>[
-                  ChatMessage(),
-                  ChatMessage(),
-                  ChatMessage(),
-                ],
+              child: StreamBuilder(
+                stream: Firestore.instance.collection("messages").snapshots(),
+                builder: (context, snapshot) {
+                  switch (snapshot.connectionState) {
+                    case ConnectionState.done:
+                    case ConnectionState.waiting:
+                      return Center(
+                        child: CircularProgressIndicator(),
+                      );
+                      break;
+                    default:
+                      return ListView.builder(
+                        reverse: true,
+                        itemCount: snapshot.data.documents.length,
+                        itemBuilder: (context, index) {
+                          List r = snapshot.data.documents.reversed.toList();
+                          return ChatMessage(r[index].data);
+                        },
+                      );
+                  }
+                },
               ),
             ),
             Divider(
@@ -83,7 +149,16 @@ class TextComposer extends StatefulWidget {
 }
 
 class _TextComposerState extends State<TextComposer> {
+  final TextEditingController _textEditingController = TextEditingController();
   bool _isComposing = false;
+
+  void reset() {
+    _textEditingController.clear();
+    setState(() {
+      _isComposing = false;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return IconTheme(
@@ -99,11 +174,25 @@ class _TextComposerState extends State<TextComposer> {
             Container(
               child: IconButton(
                 icon: Icon(Icons.photo_camera),
-                onPressed: () {},
+                onPressed: () async {
+                  await _ensureLoggedIn();
+                  File imgFile =
+                      await ImagePicker.pickImage(source: ImageSource.camera);
+                  if (imgFile == null) return;
+                  StorageUploadTask task = FirebaseStorage.instance
+                      .ref()
+                      .child(googleSignIn.currentUser.id.toString() +
+                          DateTime.now().millisecondsSinceEpoch.toString())
+                      .putFile(imgFile);
+                  String downloadUrl =
+                      await (await task.onComplete).ref.getDownloadURL();
+                  _sendMessage(imgUrl: downloadUrl);
+                },
               ),
             ),
             Expanded(
               child: TextField(
+                controller: _textEditingController,
                 decoration:
                     InputDecoration.collapsed(hintText: "Enviar uma mensagem"),
                 onChanged: (text) {
@@ -118,10 +207,20 @@ class _TextComposerState extends State<TextComposer> {
               child: Theme.of(context).platform == TargetPlatform.iOS
                   ? CupertinoButton(
                       child: Text("Enviar"),
-                      onPressed: _isComposing ? () {} : null)
+                      onPressed: _isComposing
+                          ? () {
+                              _handleSubmitted(_textEditingController.text);
+                              reset();
+                            }
+                          : null)
                   : IconButton(
                       icon: Icon(Icons.send),
-                      onPressed: _isComposing ? () {} : null,
+                      onPressed: _isComposing
+                          ? () {
+                              _handleSubmitted(_textEditingController.text);
+                              reset();
+                            }
+                          : null,
                     ),
             )
           ],
@@ -132,7 +231,9 @@ class _TextComposerState extends State<TextComposer> {
 }
 
 class ChatMessage extends StatelessWidget {
-  const ChatMessage({Key key}) : super(key: key);
+  final Map<String, dynamic> data;
+
+  ChatMessage(this.data);
 
   @override
   Widget build(BuildContext context) {
@@ -144,8 +245,7 @@ class ChatMessage extends StatelessWidget {
           Container(
             margin: const EdgeInsets.only(right: 16.0),
             child: CircleAvatar(
-              backgroundImage: NetworkImage(
-                  "https://avatars3.githubusercontent.com/u/29952508?s=460&v=4"),
+              backgroundImage: NetworkImage(data["senderPhotoUrl"]),
             ),
           ),
           Expanded(
@@ -153,12 +253,23 @@ class ChatMessage extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
                 Text(
-                  "Márcio",
-                  style: Theme.of(context).textTheme.subhead,
+                  data["senderName"],
+                  style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold),
                 ),
                 Container(
                   margin: const EdgeInsets.only(top: 5.0),
-                  child: Text("teste"),
+                  child: data["imgUrl"] != null
+                      ? Image.network(
+                          data["imgUrl"],
+                          width: 250.0,
+                        )
+                      : Text(
+                          data["text"],
+                          style: TextStyle(color: Colors.white),
+                        ),
                 )
               ],
             ),
