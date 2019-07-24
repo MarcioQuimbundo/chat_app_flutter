@@ -25,13 +25,13 @@ final auth = FirebaseAuth.instance;
 
 Future<Null> _ensureLoggedIn() async {
   GoogleSignInAccount user = googleSignIn.currentUser;
-  if (user == null) {
+  /*if (user == null) {
     try {
       user = await googleSignIn.signInSilently();
     } catch (e) {
       print('$e');
     }
-  }
+  }*/
   if (user == null) user = await googleSignIn.signIn();
   if (await auth.currentUser() == null) {
     final GoogleSignInAuthentication googleAuth =
