@@ -1,4 +1,4 @@
-import 'dart:io';
+import 'dart:io';   
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/cupertino.dart';
@@ -35,12 +35,6 @@ Future<Null> _ensureLoggedIn() async {
     await auth.signInWithCredential(credential);
   }
 }
-
-_handleSubmitted(String text) async {
-  await _ensureLoggedIn();
-  _sendMessage(text: text);
-}
-
 void _sendMessage({String text, String imgUrl}) {
   Firestore.instance.collection("messages").add({
     "text": text,
@@ -49,6 +43,12 @@ void _sendMessage({String text, String imgUrl}) {
     "senderPhotoUrl": googleSignIn.currentUser.photoUrl
   });
 }
+_handleSubmitted(String text) async {
+  await _ensureLoggedIn();
+  _sendMessage(text: text);
+}
+
+
 
 class MyApp extends StatelessWidget {
   const MyApp({Key key}) : super(key: key);
