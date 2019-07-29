@@ -1,28 +1,16 @@
-import 'dart:io';   
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:firebase_storage/firebase_storage.dart';
-import 'package:flutter/cupertino.dart';
-import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/material.dart';
 import 'package:google_sign_in/google_sign_in.dart';
-import 'package:image_picker/image_picker.dart';
 
-void main() async {
+void main() {
   runApp(MyApp());
 }
-
-final ThemeData kIOSTheme = ThemeData(
-    primarySwatch: Colors.orange,
-    primaryColor: Colors.grey[100],
-    primaryColorBrightness: Brightness.light);
-
-final ThemeData kDefaultTheme = ThemeData(
-    primarySwatch: Colors.amber, accentColor: Colors.amberAccent[400]);
 
 final googleSignIn = GoogleSignIn();
 final auth = FirebaseAuth.instance;
 
-Future<Null> _ensureLoggedIn() async {
+Future<Null> googleLogin() async{
   GoogleSignInAccount user = googleSignIn.currentUser;
   if (user == null) user = await googleSignIn.signIn();
   if (await auth.currentUser() == null) {
@@ -35,6 +23,7 @@ Future<Null> _ensureLoggedIn() async {
     await auth.signInWithCredential(credential);
   }
 }
+
 void _sendMessage({String text, String imgUrl}) {
   Firestore.instance.collection("messages").add({
     "text": text,
@@ -43,12 +32,11 @@ void _sendMessage({String text, String imgUrl}) {
     "senderPhotoUrl": googleSignIn.currentUser.photoUrl
   });
 }
+
 _handleSubmitted(String text) async {
-  await _ensureLoggedIn();
+  await googleLogin();
   _sendMessage(text: text);
 }
-
-
 
 class MyApp extends StatelessWidget {
   const MyApp({Key key}) : super(key: key);
@@ -56,46 +44,29 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: "Chat Concierge",
       debugShowCheckedModeBanner: false,
-      theme: Theme.of(context).platform == TargetPlatform.iOS
-          ? kIOSTheme
-          : kDefaultTheme,
-      home: ChatScreen(),
+      title: "Chat Jam",
+      home: TelaChat(),
     );
   }
 }
 
-class ChatScreen extends StatefulWidget {
-  ChatScreen({Key key}) : super(key: key);
 
-  _ChatScreenState createState() => _ChatScreenState();
+class TelaChat extends StatefulWidget {
+  _TelaChatState createState() => _TelaChatState();
 }
 
-class _ChatScreenState extends State<ChatScreen> {
-  @override
-  void initState() {
-    _ensureLoggedIn();
-    super.initState();
-  }
-
+class _TelaChatState extends State<TelaChat> {
   @override
   Widget build(BuildContext context) {
-    return SafeArea(
-      bottom: false,
-      top: false,
-      child: Scaffold(
-        backgroundColor: Colors.black,
-        appBar: AppBar(
-          title: Text("Concierge Chat"),
-          centerTitle: true,
-          elevation:
-              Theme.of(context).platform == TargetPlatform.iOS ? 0.0 : 4.0,
-        ),
-        body: Column(
-          children: <Widget>[
-            Expanded(
-              child: StreamBuilder(
+    return Scaffold(
+      appBar: AppBar(
+        title: Text("Flutter Jam", style: TextStyle(fontSize: 16),),
+      ),
+      body: Column(
+        children: <Widget>[
+          Expanded(
+            child: StreamBuilder(
                 stream: Firestore.instance.collection("messages").snapshots(),
                 builder: (context, snapshot) {
                   switch (snapshot.connectionState) {
@@ -111,131 +82,31 @@ class _ChatScreenState extends State<ChatScreen> {
                         itemCount: snapshot.data.documents.length,
                         itemBuilder: (context, index) {
                           List r = snapshot.data.documents.reversed.toList();
-                          return ChatMessage(r[index].data);
+                          return Messages(r[index].data);
                         },
                       );
                   }
                 },
               ),
-            ),
-            Divider(
-              height: 1.0,
-            ),
-            Container(
-              decoration: BoxDecoration(
-                color: Theme.of(context).cardColor,
-              ),
-              child: TextComposer(),
-            )
-          ],
-        ),
+          ),
+          EditorTexto(),
+        ],
       ),
     );
   }
 }
 
-class TextComposer extends StatefulWidget {
-  TextComposer({Key key}) : super(key: key);
-
-  _TextComposerState createState() => _TextComposerState();
-}
-
-class _TextComposerState extends State<TextComposer> {
-  final TextEditingController _textEditingController = TextEditingController();
-  bool _isComposing = false;
-
-  void reset() {
-    _textEditingController.clear();
-    setState(() {
-      _isComposing = false;
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return IconTheme(
-      data: IconThemeData(color: Theme.of(context).accentColor),
-      child: Container(
-        margin: const EdgeInsets.symmetric(horizontal: 8.0),
-        decoration: Theme.of(context).platform == TargetPlatform.iOS
-            ? BoxDecoration(
-                border: Border(top: BorderSide(color: Colors.grey[200])))
-            : null,
-        child: Row(
-          children: <Widget>[
-            Container(
-              child: IconButton(
-                icon: Icon(Icons.photo_camera),
-                onPressed: () async {
-                  await _ensureLoggedIn();
-                  File imgFile =
-                      await ImagePicker.pickImage(source: ImageSource.camera);
-                  if (imgFile == null) return;
-                  StorageUploadTask task = FirebaseStorage.instance
-                      .ref()
-                      .child(googleSignIn.currentUser.id.toString() +
-                          DateTime.now().millisecondsSinceEpoch.toString())
-                      .putFile(imgFile);
-                  String downloadUrl =
-                      await (await task.onComplete).ref.getDownloadURL();
-                  _sendMessage(imgUrl: downloadUrl);
-                },
-              ),
-            ),
-            Expanded(
-              child: TextField(
-                controller: _textEditingController,
-                decoration:
-                    InputDecoration.collapsed(hintText: "Enviar uma mensagem"),
-                onChanged: (text) {
-                  setState(() {
-                    _isComposing = text.length > 0;
-                  });
-                },
-              ),
-            ),
-            Container(
-              margin: const EdgeInsets.symmetric(horizontal: 4.0),
-              child: Theme.of(context).platform == TargetPlatform.iOS
-                  ? CupertinoButton(
-                      child: Text("Enviar"),
-                      onPressed: _isComposing
-                          ? () {
-                              _handleSubmitted(_textEditingController.text);
-                              reset();
-                            }
-                          : null)
-                  : IconButton(
-                      icon: Icon(Icons.send),
-                      onPressed: _isComposing
-                          ? () {
-                              _handleSubmitted(_textEditingController.text);
-                              reset();
-                            }
-                          : null,
-                    ),
-            )
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class ChatMessage extends StatelessWidget {
+class Messages extends StatelessWidget {
   final Map<String, dynamic> data;
-
-  ChatMessage(this.data);
-
+  Messages(this.data);
   @override
   Widget build(BuildContext context) {
     return Container(
-      margin: const EdgeInsets.symmetric(vertical: 10.0, horizontal: 20.0),
+      margin: EdgeInsets.symmetric(vertical: 10, horizontal: 20),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
           Container(
-            margin: const EdgeInsets.only(right: 16.0),
+            margin: EdgeInsets.only(right: 10),
             child: CircleAvatar(
               backgroundImage: NetworkImage(data["senderPhotoUrl"]),
             ),
@@ -246,13 +117,9 @@ class ChatMessage extends StatelessWidget {
               children: <Widget>[
                 Text(
                   data["senderName"],
-                  style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold),
+                  style: TextStyle(fontSize: 16),
                 ),
                 Container(
-                  margin: const EdgeInsets.only(top: 5.0),
                   child: data["imgUrl"] != null
                       ? Image.network(
                           data["imgUrl"],
@@ -260,7 +127,7 @@ class ChatMessage extends StatelessWidget {
                         )
                       : Text(
                           data["text"],
-                          style: TextStyle(color: Colors.white),
+                          style: TextStyle(color: Colors.black),
                         ),
                 )
               ],
@@ -268,6 +135,33 @@ class ChatMessage extends StatelessWidget {
           )
         ],
       ),
+    );
+  }
+}
+
+class EditorTexto extends StatefulWidget {
+  _EditorTextoState createState() => _EditorTextoState();
+}
+
+class _EditorTextoState extends State<EditorTexto> {
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: <Widget>[
+        IconButton(
+          icon: Icon(Icons.photo_camera),
+          onPressed: () {},
+        ),
+        Expanded(
+          child: TextField(
+            decoration: InputDecoration.collapsed(hintText: "Enviar Mensagem"),
+          ),
+        ),
+        IconButton(
+          icon: Icon(Icons.send),
+          onPressed: () {},
+        )
+      ],
     );
   }
 }
